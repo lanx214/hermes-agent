@@ -6758,6 +6758,21 @@ class BasePlatformAdapter(ABC):
                 # adapter while its in-flight handler was still producing a
                 # final response; that response is a new message, so resolve
                 # the current transport before sending it.
+                # HERMES_FEISHU_CARD_EXACT_BASE_NO_TEXT_PATCH_BEGIN
+                try:
+                    from hermes_feishu_card.hook_runtime import finalize_exact_base_no_text as _hfc_finalize_exact_base_no_text
+                    if not text_content or _tts_caption_delivered:
+                        await _hfc_finalize_exact_base_no_text({
+                            **locals(),
+                            "source": event.source,
+                        })
+                except Exception as _hfc_exc:
+                    try:
+                        import sys as _hfc_sys
+                        print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                    except Exception:
+                        pass
+                # HERMES_FEISHU_CARD_EXACT_BASE_NO_TEXT_PATCH_END
                 if text_content and not _tts_caption_delivered:
                     delivery_adapter = self._final_delivery_adapter(event.source)
                     logger.info(
@@ -6812,6 +6827,25 @@ class BasePlatformAdapter(ABC):
                         except Exception:
                             logger.debug("delivery ledger record failed", exc_info=True)
                             _obligation_id = None
+                    # HERMES_FEISHU_CARD_EXACT_BASE_FINAL_DELIVERY_PATCH_BEGIN
+                    try:
+                        from hermes_feishu_card.hook_runtime import prepare_exact_base_final_delivery as _hfc_prepare_exact_base_final_delivery
+                        delivery_adapter, text_content, _reply_anchor, _final_thread_metadata = await _hfc_prepare_exact_base_final_delivery({
+                            **locals(),
+                            "source": event.source,
+                            "delivery_adapter": delivery_adapter,
+                            "content": text_content,
+                            "obligation_id": _obligation_id,
+                            "reply_to": _reply_anchor,
+                            "metadata": _final_thread_metadata,
+                        })
+                    except Exception as _hfc_exc:
+                        try:
+                            import sys as _hfc_sys
+                            print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                        except Exception:
+                            pass
+                    # HERMES_FEISHU_CARD_EXACT_BASE_FINAL_DELIVERY_PATCH_END
                     result = await delivery_adapter._send_with_retry(
                         chat_id=event.source.chat_id,
                         content=text_content,

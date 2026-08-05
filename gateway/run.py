@@ -5770,6 +5770,25 @@ class TurnRunner:
 
     def _status_callback_sync(self, event_type: str, message: str) -> None:
         ctx = self._ctx
+        # HERMES_FEISHU_CARD_STATUS_PATCH_BEGIN
+        _hfc_turn_ctx = ctx
+        try:
+            from hermes_feishu_card.hook_runtime import handle_status_from_hermes_locals as _hfc_handle_status
+            if _hfc_turn_ctx._run_still_current():
+                _hfc_handle_status({
+                    **locals(),
+                    "source": _hfc_turn_ctx.source,
+                    "chat_id": _hfc_turn_ctx._status_chat_id,
+                    "message_id": _hfc_turn_ctx.event_message_id,
+                    "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                }, event_type=event_type, message=message)
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_STATUS_PATCH_END
         if not ctx._status_adapter or not ctx._run_still_current():
             return
         prepared_message = _prepare_gateway_status_message(
@@ -5935,6 +5954,26 @@ class TurnRunner:
                     )
                     if _want_stream_deltas:
                         def _stream_delta_cb(text: str) -> None:
+                            # HERMES_FEISHU_CARD_ANSWER_DELTA_PATCH_BEGIN
+                            _hfc_turn_ctx = ctx
+                            try:
+                                from hermes_feishu_card.hook_runtime import emit_from_hermes_locals_threadsafe as _hfc_emit_threadsafe
+                                if text and _hfc_turn_ctx._run_still_current():
+                                    if _hfc_emit_threadsafe({
+                                        **locals(),
+                                        "source": _hfc_turn_ctx.source,
+                                        "message_id": _hfc_turn_ctx.event_message_id,
+                                        "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                                        "text": text,
+                                    }, event_name="answer.delta"):
+                                        return
+                            except Exception as _hfc_exc:
+                                try:
+                                    import sys as _hfc_sys
+                                    print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                                except Exception:
+                                    pass
+                            # HERMES_FEISHU_CARD_ANSWER_DELTA_PATCH_END
                             if ctx._run_still_current():
                                 _stream_consumer.on_delta(text)
                                 # Tee to the streaming-TTS consumer (#60671).
@@ -5953,6 +5992,27 @@ class TurnRunner:
                     _stts_consumer_ref.on_delta(text)
 
         def _interim_assistant_cb(text: str, *, already_streamed: bool = False) -> None:
+            # HERMES_FEISHU_CARD_THINKING_DELTA_PATCH_BEGIN
+            _hfc_turn_ctx = ctx
+            try:
+                from hermes_feishu_card.hook_runtime import emit_from_hermes_locals_threadsafe as _hfc_emit_threadsafe
+                if text and not already_streamed and _hfc_turn_ctx._run_still_current():
+                    if _hfc_emit_threadsafe({
+                        **locals(),
+                        "source": _hfc_turn_ctx.source,
+                        "message_id": _hfc_turn_ctx.event_message_id,
+                        "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                        "text": text,
+                        "mode": "append_block",
+                    }, event_name="thinking.delta"):
+                        return
+            except Exception as _hfc_exc:
+                try:
+                    import sys as _hfc_sys
+                    print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                except Exception:
+                    pass
+            # HERMES_FEISHU_CARD_THINKING_DELTA_PATCH_END
             if not ctx._run_still_current():
                 return
             display_text = text
@@ -6293,6 +6353,99 @@ class TurnRunner:
             and ctx.native_tool_complete_callback is not None
             else None
         )
+        # HERMES_FEISHU_CARD_STABLE_TOOL_PATCH_BEGIN
+        _hfc_turn_ctx = ctx
+        _hfc_stable_tool_callbacks_available = [False]
+        _hfc_pending_tool_previews = {}
+        try:
+            from hermes_feishu_card.hook_runtime import emit_from_hermes_locals_threadsafe as _hfc_emit_stable_threadsafe
+            _hfc_original_tool_progress_callback = getattr(agent, "tool_progress_callback", None)
+            if getattr(_hfc_original_tool_progress_callback, "_hfc_stable_wrapper", False):
+                _hfc_original_tool_progress_callback = getattr(_hfc_original_tool_progress_callback, "_hfc_original_callback", None)
+            _hfc_original_tool_start_callback = getattr(agent, "tool_start_callback", None)
+            if getattr(_hfc_original_tool_start_callback, "_hfc_stable_wrapper", False):
+                _hfc_original_tool_start_callback = getattr(_hfc_original_tool_start_callback, "_hfc_original_callback", None)
+            _hfc_original_tool_complete_callback = getattr(agent, "tool_complete_callback", None)
+            if getattr(_hfc_original_tool_complete_callback, "_hfc_stable_wrapper", False):
+                _hfc_original_tool_complete_callback = getattr(_hfc_original_tool_complete_callback, "_hfc_original_callback", None)
+            def _hfc_tool_progress_callback(event_type, tool_name=None, preview=None, args=None, **kwargs):
+                if event_type in ("tool.started", "tool.completed") and _hfc_turn_ctx._run_still_current():
+                    if event_type == "tool.started":
+                        _hfc_tool_key = tool_name or "tool"
+                        _hfc_pending_tool_previews.setdefault(_hfc_tool_key, []).append(preview or "")
+                    return None
+                if callable(_hfc_original_tool_progress_callback):
+                    return _hfc_original_tool_progress_callback(event_type, tool_name, preview, args, **kwargs)
+                return None
+            def _hfc_tool_start_callback(call_id, tool_name, args):
+                try:
+                    if callable(_hfc_original_tool_start_callback):
+                        _hfc_original_tool_start_callback(call_id, tool_name, args)
+                except Exception:
+                    pass
+                _hfc_tool_key = tool_name or "tool"
+                _hfc_preview_queue = _hfc_pending_tool_previews.get(_hfc_tool_key) or []
+                _hfc_tool_preview = _hfc_preview_queue.pop(0) if _hfc_preview_queue else ""
+                if not _hfc_preview_queue:
+                    _hfc_pending_tool_previews.pop(_hfc_tool_key, None)
+                if not _hfc_turn_ctx._run_still_current():
+                    return
+                _hfc_delivered = _hfc_emit_stable_threadsafe({
+                    **locals(),
+                    "source": _hfc_turn_ctx.source,
+                    "message_id": _hfc_turn_ctx.event_message_id,
+                    "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                    "tool_id": str(call_id or tool_name or "tool"),
+                    "name": tool_name or "tool",
+                    "status": "running",
+                    "detail": _hfc_tool_preview,
+                    "arguments": args,
+                }, event_name="tool.updated")
+                if not _hfc_delivered:
+                    _hfc_stable_tool_callbacks_available[0] = False
+                    try:
+                        if callable(_hfc_original_tool_progress_callback):
+                            _hfc_original_tool_progress_callback("tool.started", tool_name, _hfc_tool_preview, args, _hfc_force_tool_progress_fallback=True)
+                    finally:
+                        _hfc_stable_tool_callbacks_available[0] = True
+            def _hfc_tool_complete_callback(call_id, tool_name, args, result):
+                try:
+                    if callable(_hfc_original_tool_complete_callback):
+                        _hfc_original_tool_complete_callback(call_id, tool_name, args, result)
+                except Exception:
+                    pass
+                if not _hfc_turn_ctx._run_still_current():
+                    return
+                _hfc_delivered = _hfc_emit_stable_threadsafe({
+                    **locals(),
+                    "source": _hfc_turn_ctx.source,
+                    "message_id": _hfc_turn_ctx.event_message_id,
+                    "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                    "tool_id": str(call_id or tool_name or "tool"),
+                    "name": tool_name or "tool",
+                    "status": "completed",
+                    "detail": "",
+                }, event_name="tool.updated")
+                if not _hfc_delivered:
+                    _hfc_stable_tool_callbacks_available[0] = False
+                    try:
+                        if callable(_hfc_original_tool_progress_callback):
+                            _hfc_original_tool_progress_callback("tool.completed", tool_name, None, None, _hfc_force_tool_progress_fallback=True)
+                    finally:
+                        _hfc_stable_tool_callbacks_available[0] = True
+            _hfc_tool_progress_callback._hfc_stable_wrapper = True
+            _hfc_tool_progress_callback._hfc_original_callback = _hfc_original_tool_progress_callback
+            _hfc_tool_start_callback._hfc_stable_wrapper = True
+            _hfc_tool_start_callback._hfc_original_callback = _hfc_original_tool_start_callback
+            _hfc_tool_complete_callback._hfc_stable_wrapper = True
+            _hfc_tool_complete_callback._hfc_original_callback = _hfc_original_tool_complete_callback
+            agent.tool_progress_callback = _hfc_tool_progress_callback
+            agent.tool_start_callback = _hfc_tool_start_callback
+            agent.tool_complete_callback = _hfc_tool_complete_callback
+            _hfc_stable_tool_callbacks_available[0] = True
+        except Exception:
+            _hfc_stable_tool_callbacks_available[0] = False
+        # HERMES_FEISHU_CARD_STABLE_TOOL_PATCH_END
         agent.step_callback = ctx._step_callback_sync if ctx._hooks_ref.loaded_hooks else None
         agent.stream_delta_callback = _stream_delta_cb
         agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
@@ -6474,6 +6627,30 @@ class TurnRunner:
         # rather than hang forever).
         # ------------------------------------------------------------------
         def _clarify_callback_sync(question: str, choices, multi_select: bool = False) -> str:
+            # HERMES_FEISHU_CARD_CLARIFY_PATCH_BEGIN
+            _hfc_turn_ctx = ctx
+            try:
+                from hermes_feishu_card.hook_runtime import request_clarify_response_from_hermes_locals as _hfc_request_clarify
+                from uuid import uuid4 as _hfc_uuid4
+                if choices and _hfc_turn_ctx._run_still_current():
+                    _hfc_clarify_response = _hfc_request_clarify({
+                        **locals(),
+                        "source": _hfc_turn_ctx.source,
+                        "chat_id": _hfc_turn_ctx._status_chat_id,
+                        "conversation_id": _hfc_turn_ctx.session_key or _hfc_turn_ctx._status_chat_id,
+                        "message_id": _hfc_turn_ctx.event_message_id,
+                        "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                        "kind": "clarify",
+                    }, interaction_id="clarify_" + _hfc_uuid4().hex[:10], question=question, choices=choices)
+                    if _hfc_clarify_response is not None:
+                        return _hfc_clarify_response
+            except Exception as _hfc_exc:
+                try:
+                    import sys as _hfc_sys
+                    print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                except Exception:
+                    pass
+            # HERMES_FEISHU_CARD_CLARIFY_PATCH_END
             from tools import clarify_gateway as _clarify_mod
             import uuid as _uuid
 
@@ -6688,6 +6865,31 @@ class TurnRunner:
             # is active.  The approval message send auto-clears the Slack
             # status; pausing prevents _keep_typing from re-setting it.
             # Typing resumes in _handle_approve_command/_handle_deny_command.
+            # HERMES_FEISHU_CARD_APPROVAL_PATCH_BEGIN
+            _hfc_turn_ctx = ctx
+            try:
+                from hermes_feishu_card.hook_runtime import request_approval_choice_from_hermes_locals as _hfc_request_approval
+                from uuid import uuid4 as _hfc_uuid4
+                if _hfc_turn_ctx._run_still_current():
+                    _hfc_approval_choice = _hfc_request_approval({
+                        **locals(),
+                        "source": _hfc_turn_ctx.source,
+                        "chat_id": _hfc_turn_ctx._status_chat_id,
+                        "conversation_id": _approval_session_key or _hfc_turn_ctx._status_chat_id,
+                        "message_id": _hfc_turn_ctx.event_message_id,
+                        "_hfc_loop": _hfc_turn_ctx._loop_for_step,
+                    }, approval_data, interaction_id="approval_" + _hfc_uuid4().hex[:10])
+                    if _hfc_approval_choice:
+                        from tools.approval import resolve_gateway_approval as _hfc_resolve_gateway_approval
+                        _hfc_resolve_gateway_approval(_approval_session_key, _hfc_approval_choice)
+                        return
+            except Exception as _hfc_exc:
+                try:
+                    import sys as _hfc_sys
+                    print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                except Exception:
+                    pass
+            # HERMES_FEISHU_CARD_APPROVAL_PATCH_END
             ctx._status_adapter.pause_typing_for_chat(ctx._status_chat_id)
 
             # For WeCom native streaming: signal the stream consumer to close
@@ -13019,6 +13221,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             )
 
             try:
+                # HERMES_FEISHU_CARD_NATIVE_REDELIVERY_PATCH_BEGIN
+                try:
+                    from hermes_feishu_card.hook_runtime import prepare_native_handoff_recovery as _hfc_prepare_native_handoff_recovery
+                    await _hfc_prepare_native_handoff_recovery(
+                        adapter=adapter,
+                        obligation_id=row.get("obligation_id"),
+                        chat_id=row.get("chat_id"),
+                        content=content,
+                        original_content=row.get("content"),
+                        thread_id=row.get("thread_id") or "",
+                    )
+                except Exception as _hfc_exc:
+                    try:
+                        import sys as _hfc_sys
+                        print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                    except Exception:
+                        pass
+                # HERMES_FEISHU_CARD_NATIVE_REDELIVERY_PATCH_END
                 result = await adapter.send(
                     chat_id=row["chat_id"],
                     content=content,
@@ -14364,6 +14584,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # a session whose final response was generated but never
         # confirmed-delivered has its answer in the ledger — redelivering it
         # is strictly cheaper and more correct than re-running the whole turn.
+        # HERMES_FEISHU_CARD_COMMAND_CARD_STARTUP_PATCH_BEGIN
+        try:
+            from hermes_feishu_card.hook_runtime import install_feishu_command_card_adapter_methods as _hfc_install_command_cards
+            _hfc_install_command_cards(self)
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_COMMAND_CARD_STARTUP_PATCH_END
         self._schedule_resume_pending_sessions()
         await self._finish_startup_restore()
 
@@ -17642,6 +17873,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     async def _deliver_platform_notice(self, source, content: str) -> None:
         """Deliver a setup/operational notice using platform-specific privacy rules."""
+        # HERMES_FEISHU_CARD_PLATFORM_NOTICE_PATCH_BEGIN
+        try:
+            from hermes_feishu_card.hook_runtime import handle_platform_notice_from_hermes as _hfc_handle_platform_notice
+            if _hfc_handle_platform_notice(self, source, content):
+                return None
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_PLATFORM_NOTICE_PATCH_END
         adapter = self._adapter_for_source(source)
         if not adapter:
             return
@@ -18164,6 +18407,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         7. Return response
         """
         source = event.source
+        # HERMES_FEISHU_CARD_COMMAND_CARD_PATCH_BEGIN
+        try:
+            from hermes_feishu_card.hook_runtime import install_feishu_command_card_adapter_methods as _hfc_install_command_cards
+            _hfc_install_command_cards(self, event=event)
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_COMMAND_CARD_PATCH_END
 
         # 🔴 Cross-session leak guard. This handler runs inside a per-message
         # asyncio task created via create_task(), which snapshots the spawning
@@ -18441,6 +18695,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Otherwise control/session commands like /new or /help get silently
         # consumed as update answers instead of being dispatched normally.
         _quick_key = self._session_key_for_source(source)
+        # HERMES_FEISHU_CARD_HFC_COMMAND_PATCH_BEGIN
+        try:
+            from hermes_feishu_card.hook_runtime import maintenance_admission_from_hermes_locals as _hfc_enforce_maintenance_admission
+            if await _hfc_enforce_maintenance_admission(locals()):
+                return None
+            from hermes_feishu_card.hook_runtime import handle_hfc_command_from_hermes_locals as _hfc_handle_command
+            _hfc_command_message_id = None
+            try:
+                _hfc_command_message_id = self._reply_anchor_for_event(event)
+            except Exception:
+                _hfc_command_message_id = getattr(event, "message_id", None)
+            if _hfc_handle_command({**locals(), "message_id": _hfc_command_message_id}):
+                return None
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_HFC_COMMAND_PATCH_END
         allow_gateway_control = event.allow_gateway_control
         _up_state = self._peek_session_state(_quick_key)
         if (
@@ -20537,6 +20811,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
         """Inner handler that runs under the _running_agents sentinel guard."""
+        # HERMES_FEISHU_CARD_PATCH_BEGIN
+        # HERMES_FEISHU_CARD_STRATEGY gateway_run_013_plus
+        try:
+            from hermes_feishu_card.hook_runtime import emit_from_hermes_locals as _hfc_emit
+            from hermes_feishu_card.hook_runtime import handle_hfc_command_from_hermes_locals as _hfc_handle_command
+            _hfc_started_message_id = None
+            try:
+                _hfc_started_message_id = getattr(event, "message_id", None) or self._reply_anchor_for_event(event)
+            except Exception:
+                _hfc_started_message_id = getattr(event, "message_id", None)
+            if _hfc_handle_command({**locals(), "message_id": _hfc_started_message_id}):
+                return None
+            _hfc_emit({**locals(), "message_id": _hfc_started_message_id})
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_PATCH_END
         _msg_start_time = time.time()
         _platform_name = source.platform.value if hasattr(source.platform, "value") else str(source.platform)
         _msg_preview = (event.text or "")[:80].replace("\n", " ")
@@ -23096,6 +23390,58 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # content the user hasn't seen (streaming only sent earlier
             # partial output before the failure).  Without this guard,
             # users see the agent "stop responding without explanation."
+            # HERMES_FEISHU_CARD_COMPLETE_PATCH_BEGIN
+            try:
+                from hermes_feishu_card.hook_runtime import build_event as _hfc_build_event
+                from hermes_feishu_card.hook_runtime import emit_from_hermes_locals_async as _hfc_emit_async
+                from hermes_feishu_card.hook_runtime import can_stage_exact_base_completion as _hfc_can_stage_exact
+                from hermes_feishu_card.hook_runtime import stage_message_completed_from_hermes_locals_async as _hfc_stage_exact
+                from hermes_feishu_card.hook_runtime import should_suppress_native_response as _hfc_should_suppress
+                from hermes_feishu_card.hook_runtime import native_media_only_response as _hfc_media_only
+                _hfc_completed_message_id = None
+                try:
+                    _hfc_completed_message_id = self._reply_anchor_for_event(event)
+                except Exception:
+                    _hfc_completed_message_id = getattr(event, "message_id", None)
+                _hfc_completed_locals = {
+                    **locals(),
+                    "message_id": _hfc_completed_message_id,
+                    "answer": response,
+                    "duration": _response_time,
+                    "model": agent_result.get("model", ""),
+                    "tokens": {
+                        "input_tokens": agent_result.get("input_tokens", 0),
+                        "output_tokens": agent_result.get("output_tokens", 0),
+                    },
+                    "context": {
+                        "used_tokens": agent_result.get("last_prompt_tokens", 0),
+                        "max_tokens": agent_result.get("context_length", 0),
+                    },
+                }
+                _hfc_exact_staged = False
+                if _hfc_can_stage_exact(_hfc_completed_locals):
+                    _hfc_exact_staged = await _hfc_stage_exact(_hfc_completed_locals)
+                if not _hfc_exact_staged:
+                    _hfc_completed_event = _hfc_build_event("message.completed", _hfc_completed_locals, preview=True)
+                    _hfc_attachments = []
+                    _hfc_native_delivery = "allowed"
+                    if _hfc_completed_event is not None:
+                        _hfc_completed_data = _hfc_completed_event.get("data", {})
+                        _hfc_attachments = _hfc_completed_data.get("attachments", [])
+                        _hfc_native_delivery = _hfc_completed_data.get("native_delivery", "required" if _hfc_attachments else "allowed")
+                    _hfc_card_delivered = await _hfc_emit_async(_hfc_completed_locals, event_name="message.completed")
+                    _hfc_platform = getattr(source.platform, "value", source.platform)
+                    if str(_hfc_platform).lower() == "feishu" and _hfc_card_delivered and _hfc_native_delivery == "required":
+                        response = _hfc_media_only(response)
+                    if _hfc_should_suppress(_hfc_platform, _hfc_card_delivered, _hfc_attachments, _hfc_native_delivery):
+                        return None
+            except Exception as _hfc_exc:
+                try:
+                    import sys as _hfc_sys
+                    print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+                except Exception:
+                    pass
+            # HERMES_FEISHU_CARD_COMPLETE_PATCH_END
             if agent_result.get("already_sent") and not agent_result.get("failed"):
                 if response:
                     _media_adapter = self._adapter_for_source(source)
@@ -25961,6 +26307,43 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Register the pending confirm FIRST so a super-fast button click
         # cannot race the send_slash_confirm return.
         _slash_confirm_mod.register(session_key, confirm_id, command, handler)
+        # HERMES_FEISHU_CARD_SLASH_CONFIRM_PATCH_BEGIN
+        try:
+            from hermes_feishu_card.hook_runtime import request_slash_confirm_from_hermes_locals_async as _hfc_request_slash_confirm
+            from hermes_feishu_card.hook_runtime import complete_command_card_from_hermes_locals_async as _hfc_complete_command_card
+            from hashlib import sha256 as _hfc_sha256
+            _hfc_slash_reply_to = None
+            try:
+                _hfc_slash_reply_to = self._reply_anchor_for_event(event)
+            except Exception:
+                _hfc_slash_reply_to = getattr(event, "message_id", None)
+            _hfc_slash_interaction_seed = (str(session_key) + ":" + str(confirm_id)).encode("utf-8")
+            _hfc_slash_interaction_id = "slash_" + _hfc_sha256(_hfc_slash_interaction_seed).hexdigest()[:16]
+            _hfc_slash_choice = await _hfc_request_slash_confirm({
+                **locals(),
+                "source": source,
+                "chat_id": getattr(source, "chat_id", ""),
+                "conversation_id": session_key,
+                "message_id": _hfc_slash_reply_to,
+                "reply_to_message_id": _hfc_slash_reply_to,
+            }, command=command, title=title, message=message, interaction_id=_hfc_slash_interaction_id)
+            if _hfc_slash_choice in {"once", "always", "cancel"}:
+                _hfc_slash_result = await handler(_hfc_slash_choice)
+                if await _hfc_complete_command_card({
+                    "source": source,
+                    "chat_id": getattr(source, "chat_id", ""),
+                    "conversation_id": session_key,
+                    "message_id": _hfc_slash_reply_to,
+                }, answer=_hfc_slash_result):
+                    return None
+                return _hfc_slash_result
+        except Exception as _hfc_exc:
+            try:
+                import sys as _hfc_sys
+                print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
+            except Exception:
+                pass
+        # HERMES_FEISHU_CARD_SLASH_CONFIRM_PATCH_END
 
         adapter = self._adapter_for_source(source)
         metadata = self._thread_metadata_for_source(source, self._reply_anchor_for_event(event))
