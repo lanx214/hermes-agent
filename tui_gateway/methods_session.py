@@ -2694,6 +2694,17 @@ def _(rid, params: dict) -> dict:
             removed = len(history) - last_user_idx
             del history[last_user_idx:]
             session["history_version"] = int(session.get("history_version", 0)) + 1
+            # Persist the truncated transcript to SQLite so session.history /
+            # session.activate (which read from the DB) reflect the undo.
+            # Without this, third-party TUIs that reload history from the DB
+            # (e.g. herm) see the pre-undo transcript after any refresh/branch.
+            if session.get("session_key"):
+                with _session_db(session) as db:
+                    if db is not None:
+                        try:
+                            db.replace_messages(session["session_key"], history)
+                        except Exception:
+                            pass
     return _ok(rid, {"removed": removed})
 
 

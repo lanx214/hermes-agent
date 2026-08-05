@@ -1380,6 +1380,17 @@ def _(rid, params: dict) -> dict:
                         session["history_version"] = (
                             int(session.get("history_version", 0)) + 1
                         )
+                        # Persist to SQLite so session.history reads the
+                        # truncated transcript (mirror of session.undo).
+                        if session.get("session_key"):
+                            with _session_db(session) as db:
+                                if db is not None:
+                                    try:
+                                        db.replace_messages(
+                                            session["session_key"], history
+                                        )
+                                    except Exception:
+                                        pass
                 result["history_removed"] = removed
             return result
 
