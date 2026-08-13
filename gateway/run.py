@@ -6641,7 +6641,7 @@ class TurnRunner:
                         "message_id": _hfc_turn_ctx.event_message_id,
                         "_hfc_loop": _hfc_turn_ctx._loop_for_step,
                         "kind": "clarify",
-                    }, interaction_id="clarify_" + _hfc_uuid4().hex[:10], question=question, choices=choices)
+                    }, interaction_id="clarify_" + _hfc_uuid4().hex[:10], question=question, choices=choices, multi_select=locals().get("multi_select", False))
                     if _hfc_clarify_response is not None:
                         return _hfc_clarify_response
             except Exception as _hfc_exc:
