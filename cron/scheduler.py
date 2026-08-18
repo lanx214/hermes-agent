@@ -3138,19 +3138,6 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
     media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
     requested_media = [(str(p), v) for p, v in media_files]
     media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
-    # Attachments the policy filter dropped will never be sent on ANY lane —
-    # record them up front so the run status says so (previously one
-    # stderr WARNING was the only trace: text delivered, file vanished).
-    _policy_dropped = len(requested_media) - len(media_files)
-    policy_drop_errors = (
-        [
-            f"{_policy_dropped} media attachment(s) dropped by media path "
-            "policy (missing file, denied prefix, or strict-mode miss); "
-            "see gateway.strict / media_delivery_allow_dirs in config.yaml"
-        ]
-        if _policy_dropped > 0
-        else []
-    )
     # HERMES_FEISHU_CARD_CRON_PATCH_BEGIN
     try:
         from hermes_feishu_card.hook_runtime import emit_cron_delivery as _hfc_emit_cron
@@ -3167,6 +3154,19 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
         except Exception:
             pass
     # HERMES_FEISHU_CARD_CRON_PATCH_END
+    # Attachments the policy filter dropped will never be sent on ANY lane —
+    # record them up front so the run status says so (previously one
+    # stderr WARNING was the only trace: text delivered, file vanished).
+    _policy_dropped = len(requested_media) - len(media_files)
+    policy_drop_errors = (
+        [
+            f"{_policy_dropped} media attachment(s) dropped by media path "
+            "policy (missing file, denied prefix, or strict-mode miss); "
+            "see gateway.strict / media_delivery_allow_dirs in config.yaml"
+        ]
+        if _policy_dropped > 0
+        else []
+    )
 
     # Resolve the delivery-mirror gate ONCE (default off). When on, each
     # successful delivery is also appended to the target chat's gateway session

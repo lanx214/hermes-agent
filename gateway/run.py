@@ -6347,12 +6347,6 @@ class TurnRunner:
             )
             else None
         )
-        agent.tool_complete_callback = (
-            ctx.native_tool_complete_callback
-            if ctx._native_slack_task_cards
-            and ctx.native_tool_complete_callback is not None
-            else None
-        )
         # HERMES_FEISHU_CARD_STABLE_TOOL_PATCH_BEGIN
         _hfc_turn_ctx = ctx
         _hfc_stable_tool_callbacks_available = [False]
@@ -6446,6 +6440,12 @@ class TurnRunner:
         except Exception:
             _hfc_stable_tool_callbacks_available[0] = False
         # HERMES_FEISHU_CARD_STABLE_TOOL_PATCH_END
+        agent.tool_complete_callback = (
+            ctx.native_tool_complete_callback
+            if ctx._native_slack_task_cards
+            and ctx.native_tool_complete_callback is not None
+            else None
+        )
         agent.step_callback = ctx._step_callback_sync if ctx._hooks_ref.loaded_hooks else None
         agent.stream_delta_callback = _stream_delta_cb
         agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
