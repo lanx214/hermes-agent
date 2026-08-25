@@ -6347,6 +6347,12 @@ class TurnRunner:
             )
             else None
         )
+        agent.tool_complete_callback = (
+            ctx.native_tool_complete_callback
+            if ctx._native_slack_task_cards
+            and ctx.native_tool_complete_callback is not None
+            else None
+        )
         # HERMES_FEISHU_CARD_STABLE_TOOL_PATCH_BEGIN
         _hfc_turn_ctx = ctx
         _hfc_stable_tool_callbacks_available = [False]
@@ -6440,12 +6446,6 @@ class TurnRunner:
         except Exception:
             _hfc_stable_tool_callbacks_available[0] = False
         # HERMES_FEISHU_CARD_STABLE_TOOL_PATCH_END
-        agent.tool_complete_callback = (
-            ctx.native_tool_complete_callback
-            if ctx._native_slack_task_cards
-            and ctx.native_tool_complete_callback is not None
-            else None
-        )
         agent.step_callback = ctx._step_callback_sync if ctx._hooks_ref.loaded_hooks else None
         agent.stream_delta_callback = _stream_delta_cb
         agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
@@ -13221,24 +13221,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             )
 
             try:
-                # HERMES_FEISHU_CARD_NATIVE_REDELIVERY_PATCH_BEGIN
-                try:
-                    from hermes_feishu_card.hook_runtime import prepare_native_handoff_recovery as _hfc_prepare_native_handoff_recovery
-                    await _hfc_prepare_native_handoff_recovery(
-                        adapter=adapter,
-                        obligation_id=row.get("obligation_id"),
-                        chat_id=row.get("chat_id"),
-                        content=content,
-                        original_content=row.get("content"),
-                        thread_id=row.get("thread_id") or "",
-                    )
-                except Exception as _hfc_exc:
-                    try:
-                        import sys as _hfc_sys
-                        print("[hermes-feishu-card] hook failed: " + _hfc_exc.__class__.__name__ + ": " + str(_hfc_exc), file=_hfc_sys.stderr)
-                    except Exception:
-                        pass
-                # HERMES_FEISHU_CARD_NATIVE_REDELIVERY_PATCH_END
                 result = await adapter.send(
                     chat_id=row["chat_id"],
                     content=content,
@@ -14584,6 +14566,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # a session whose final response was generated but never
         # confirmed-delivered has its answer in the ledger — redelivering it
         # is strictly cheaper and more correct than re-running the whole turn.
+        self._schedule_resume_pending_sessions()
+        await self._finish_startup_restore()
+
+        # Surface state.db init failures to the user's messaging platforms
+        # so they know persistence is broken before losing data (#88235).
+        await self._send_session_db_warning_notifications()
+
+        # Drain any recovered process watchers (from crash recovery checkpoint)
         # HERMES_FEISHU_CARD_COMMAND_CARD_STARTUP_PATCH_BEGIN
         try:
             from hermes_feishu_card.hook_runtime import install_feishu_command_card_adapter_methods as _hfc_install_command_cards
@@ -14595,14 +14585,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             except Exception:
                 pass
         # HERMES_FEISHU_CARD_COMMAND_CARD_STARTUP_PATCH_END
-        self._schedule_resume_pending_sessions()
-        await self._finish_startup_restore()
-
-        # Surface state.db init failures to the user's messaging platforms
-        # so they know persistence is broken before losing data (#88235).
-        await self._send_session_db_warning_notifications()
-
-        # Drain any recovered process watchers (from crash recovery checkpoint)
         try:
             from tools.process_registry import process_registry
             # Detach the current batch atomically: reassigning to a fresh list

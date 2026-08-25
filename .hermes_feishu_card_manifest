@@ -1,1 +1,22 @@
-{"backup": "gateway/run.py.hermes_feishu_card.bak", "backup_sha256": "97a3173d1a7ee0df98822d3ba173c72e997e52460bf64193b6f2c68ab20a48e3", "base_backup": "gateway/platforms/base.py.hermes_feishu_card.bak", "base_backup_sha256": "67390fb86e8dc6d5bcf333f4e560386c0bfd6667cb72947b6c83891e4e091622", "base_patched_sha256": "2160f237bb149f6811c0f4eee247d4cd21c395f62ec028f8c236ae96c4359a8f", "base_py": "gateway/platforms/base.py", "cron_backup": "cron/scheduler.py.hermes_feishu_card.bak", "cron_backup_sha256": "ac0d2f0edcfaf26ffa21aa4e7478b44bb78e6f43e3072697e2849f2b1b13b7e7", "cron_patched_sha256": "7863b1415b34766a8d4b1418983548801cfdc2a391eb7409ab1e68bd3cc27d58", "cron_py": "cron/scheduler.py", "manifest_version": 2, "patched_sha256": "bd20ad64c374620de259bd278163a4a8bf8eb794aed0ec3c40660a19e83e223c", "run_py": "gateway/run.py"}
+{
+  "backup": "gateway/run.py.hermes_feishu_card.bak",
+  "backup_sha256": "5bd7c157a4aff539a84068b2a1443f1674404e0a93748db16939abb46e8b2445",
+  "base_backup": "gateway/platforms/base.py.hermes_feishu_card.bak",
+  "base_backup_sha256": "be97f79bd306a1b9d9f0168c1269f83df6aa615d1596cadda2aa714313aeb848",
+  "base_patched_sha256": "ebf6236780846a7079f4eff0f43259d912929c887ebf9ad131f9c443c4df05f7",
+  "base_py": "gateway/platforms/base.py",
+  "cron_backup": "cron/scheduler.py.hermes_feishu_card.bak",
+  "cron_backup_sha256": "61f9c4ff1c7b9d06d8d8191396fa6d6b0db1c7ad6ae2ced984ba12fc7a336141",
+  "cron_patched_sha256": "cd2a79ece729e5d0a763b01ca6e633b16f0df08706ef103641c2498a4702e5b1",
+  "cron_py": "cron/scheduler.py",
+  "integrity": {
+    "base_blob_sha256": "ebf6236780846a7079f4eff0f43259d912929c887ebf9ad131f9c443c4df05f7",
+    "cron_blob_sha256": "cd2a79ece729e5d0a763b01ca6e633b16f0df08706ef103641c2498a4702e5b1",
+    "git_head": "293895ca4365164a68f62e51170d62020be80b3c",
+    "run_blob_sha256": "494fa61aa10b0a1245bb2bfd5204892726cafbc2c29cd4c3235502b99b12f9a6",
+    "version": 2
+  },
+  "manifest_version": 2,
+  "patched_sha256": "f3420bd05c46bab3039fe42e8752a81bbf624771e207f4f9b645d456ca86f972",
+  "run_py": "gateway/run.py"
+}
