@@ -173,3 +173,64 @@ def test_unusable_gateway_lock_held_or_linked_is_never_unlinked(tmp_path):
     finally:
         holder.stdin.close()
         holder.wait(timeout=10)
+
+
+@pytest.mark.platforms("linux")
+def test_exclusive_maintenance_conflict_logs_redacted_owner_snapshot(tmp_path, monkeypatch, caplog):
+    import logging
+    from gateway import status
+    from gateway.runtime_ownership import ProfileOwnership, OwnershipConflict, exclusive_maintenance
+
+    home = tmp_path / 'locked-profile'
+    owner = ProfileOwnership()
+    original_build_record = status._build_pid_record
+
+    def build_record_with_secret_argv():
+        record = original_build_record()
+        record['argv'] = ['--api-key', 'fixture-secret-must-not-be-logged']
+        return record
+
+    monkeypatch.setattr(status, '_build_pid_record', build_record_with_secret_argv)
+    owner.reserve([home])
+    try:
+        with caplog.at_level(logging.WARNING, logger='gateway.runtime_ownership'):
+            with pytest.raises(OwnershipConflict):
+                with exclusive_maintenance([home], purpose='fixture-maintenance'):
+                    pass
+        message = caplog.text
+        assert f'profile={home}' in message
+        assert f'owner_pid={os.getpid()}' in message
+        assert 'owner_pid_source=gateway_lock_record' in message
+        assert 'owner_kind=hermes-gateway' in message
+        assert 'attempted_purpose=fixture-maintenance' in message
+        assert 'fixture-secret-must-not-be-logged' not in message
+        assert 'argv' not in message
+    finally:
+        owner.close()
+
+
+@pytest.mark.platforms("linux")
+def test_unpublished_gateway_lock_owner_is_recovered_from_proc_locks(tmp_path):
+    from gateway.runtime_ownership import _ownership_conflict_snapshot
+
+    home = tmp_path / 'unpublished-owner'
+    home.mkdir()
+    lock = home / 'gateway.lock'
+    lock.touch()
+    holder = subprocess.Popen(
+        [sys.executable, '-c',
+         'import fcntl,sys; f=open(sys.argv[1], "r+"); fcntl.flock(f, fcntl.LOCK_EX); '
+         'print("LOCKED", flush=True); sys.stdin.read()', str(lock)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdin is not None and holder.stdout is not None
+        assert holder.stdout.readline().strip() == 'LOCKED'
+        snapshot = _ownership_conflict_snapshot(home)
+        assert snapshot['owner_pid'] == str(holder.pid), snapshot
+        assert snapshot['owner_pid_source'] == 'proc_locks', snapshot
+        assert snapshot['owner_comm'] != 'unknown', snapshot
+    finally:
+        if holder.stdin is not None:
+            holder.stdin.close()
+        holder.wait(timeout=10)
