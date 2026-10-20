@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class OwnershipConflict(RuntimeError):
-    pass
+    def __init__(self, message: str, *, home: Path | None = None):
+        super().__init__(message)
+        self.home = home
 
 
 class ReservationCancelled(OwnershipConflict):
@@ -146,6 +148,100 @@ def _still_names(path: Path, fd: int) -> bool:
         return False
 
 
+def _safe_log_value(value, *, limit: int = 80) -> str:
+    """Keep lock-record labels concise and free of control characters in logs."""
+    text = str(value or '')
+    safe = ''.join(char for char in text if char.isalnum() or char in '._:-')[:limit]
+    return safe or 'unknown'
+
+
+def _proc_flock_owner_pid(lock_path: Path) -> int | None:
+    """Find the kernel-reported flock owner for an unpublished or stale lock record."""
+    if os.name == 'nt' or not Path('/proc/locks').is_file():
+        return None
+    try:
+        info = lock_path.stat()
+        expected = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
+        for line in Path('/proc/locks').read_text(encoding='utf-8').splitlines():
+            fields = line.split()
+            try:
+                index = fields.index('FLOCK')
+                pid = int(fields[index + 3])
+                major, minor, inode = fields[index + 4].split(':', 2)
+                observed = (int(major, 16), int(minor, 16), int(inode))
+            except (ValueError, IndexError):
+                continue
+            if observed == expected and pid > 0:
+                return pid
+    except OSError:
+        pass
+    return None
+
+
+def _ownership_conflict_snapshot(home: Path) -> dict[str, str]:
+    """Return a redacted, read-only owner snapshot; never include argv or environment."""
+    snapshot = {
+        'lock_record_pid': 'unknown', 'owner_pid': 'unknown', 'owner_pid_source': 'unavailable',
+        'owner_kind': 'unknown', 'owner_purpose': 'unknown', 'owner_start_time': 'unknown',
+        'owner_comm': 'unknown', 'owner_exe': 'unknown', 'owner_unit': 'unknown',
+    }
+    try:
+        from gateway.status import _live_pid_from_record, _read_gateway_lock_record
+        record = _read_gateway_lock_record(home / 'gateway.lock') or {}
+        raw_pid = record.get('pid')
+        if isinstance(raw_pid, (int, str)) and str(raw_pid).isdigit():
+            snapshot['lock_record_pid'] = str(raw_pid)
+        snapshot['owner_kind'] = _safe_log_value(record.get('kind'))
+        snapshot['owner_purpose'] = _safe_log_value(record.get('purpose'))
+        start_time = record.get('start_time')
+        if isinstance(start_time, (int, float, str)):
+            snapshot['owner_start_time'] = _safe_log_value(start_time)
+        pid = _live_pid_from_record(record)
+        if pid is not None:
+            snapshot['owner_pid_source'] = 'gateway_lock_record'
+        else:
+            pid = _proc_flock_owner_pid(home / 'gateway.lock')
+            if pid is not None:
+                snapshot['owner_pid_source'] = 'proc_locks'
+        if pid is None:
+            return snapshot
+        snapshot['owner_pid'] = str(pid)
+        if os.name != 'nt':
+            proc = Path('/proc') / str(pid)
+            try:
+                snapshot['owner_comm'] = _safe_log_value((proc / 'comm').read_text(encoding='utf-8').strip())
+            except OSError:
+                pass
+            try:
+                snapshot['owner_exe'] = str(os.readlink(proc / 'exe'))[:240]
+            except OSError:
+                pass
+            try:
+                cgroup = (proc / 'cgroup').read_text(encoding='utf-8')
+                units = [part for line in cgroup.splitlines() for part in line.split('/') if part.endswith('.service')]
+                if units:
+                    snapshot['owner_unit'] = _safe_log_value(units[-1])
+            except OSError:
+                pass
+    except Exception:
+        # Diagnostics must never change the lock refusal or its safety semantics.
+        pass
+    return snapshot
+
+
+
+def _log_ownership_conflict(home: Path, purpose: str | None) -> None:
+    snapshot = _ownership_conflict_snapshot(home)
+    logging.getLogger(__name__).warning(
+        'exclusive maintenance refused profile=%s attempted_purpose=%s '
+        'lock_record_pid=%s owner_pid=%s owner_pid_source=%s owner_kind=%s owner_purpose=%s '
+        'owner_start_time=%s owner_comm=%r owner_exe=%r owner_unit=%s',
+        home, _safe_log_value(purpose), snapshot['lock_record_pid'], snapshot['owner_pid'],
+        snapshot['owner_pid_source'], snapshot['owner_kind'], snapshot['owner_purpose'], snapshot['owner_start_time'],
+        snapshot['owner_comm'], snapshot['owner_exe'], snapshot['owner_unit'],
+    )
+
+
 class ProfileOwnership:
     def __init__(self):
         self._handles: dict[Path, object] = {}
@@ -173,7 +269,7 @@ class ProfileOwnership:
                     handle = os.fdopen(fd, 'r+', encoding='utf-8')  # windows-footgun: ok — write-only
                     try:
                         if not _try_acquire_file_lock(handle) or not _still_names(path, handle.fileno()):
-                            raise OwnershipConflict(f'Gateway runtime already owns profile {home}')
+                            raise OwnershipConflict(f'Gateway runtime already owns profile {home}', home=home)
                         record = {**_build_pid_record(), 'hermes_home': str(home)}
                         if purpose:
                             record['purpose'] = purpose
@@ -346,8 +442,12 @@ def exclusive_maintenance(homes, *, purpose: str | None = None):
             _maintenance.state = (os.getpid(), owner)
         yield
     except OwnershipConflict as exc:
+        conflict_home = canonical_home(exc.home) if exc.home is not None else None
+        if conflict_home is not None:
+            _log_ownership_conflict(conflict_home, purpose)
         raise OwnershipConflict(
-            f'Exclusive maintenance refused: {exc}. Drain and stop the gateway, then retry.'
+            f'Exclusive maintenance refused: {exc}. Drain and stop the gateway, then retry.',
+            home=conflict_home,
         ) from exc
     finally:
         for home in reversed(owner.homes):
