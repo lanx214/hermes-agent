@@ -318,6 +318,63 @@ async def _mutate_session_request(request, profile, session_id, *, request_id,
         raise HTTPException(status_code=503, detail='storage_unavailable') from exc
 
 
+async def _backfill_via_gateway_owner(profile, stamp):
+    """Forward a standalone dashboard's owner-backfill to the live Gateway API.
+
+    The Gateway owns the profile database and its API route has the live
+    authority needed to perform this idempotent write. A standalone dashboard
+    must not compete for the offline maintenance lock while that owner exists.
+    Return None only when discovery proves the owner is absent; a discovered
+    but unreachable/incompatible owner is retryable and must never fall through
+    to a second writer.
+    """
+    from fastapi import HTTPException
+    import httpx
+    from hermes_cli.gateway_client import GatewayClientError, _session_ticket
+    from hermes_cli.gateway_runtime import discover_gateway_endpoint
+    from hermes_cli.gateway_runtime_discovery import DiscoveryError
+    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_state import _default_db_path
+
+    home = Path(_cron_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
+    try:
+        discovery = await asyncio.to_thread(discover_gateway_endpoint, home, timeout=1.5)
+    except (DiscoveryError, OSError, TimeoutError) as exc:
+        _log.warning("owner-backfill gateway discovery failed for %s (%s)", stamp, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="owner_unreachable") from exc
+
+    endpoint = getattr(discovery, "endpoint", None)
+    if endpoint is None:
+        if discovery.state == "absent":
+            return None
+        raise HTTPException(status_code=503, detail="owner_unreachable")
+
+    try:
+        ticket = await asyncio.to_thread(_session_ticket, home, endpoint, purpose="native-http")
+        payload = {"profile": profile} if profile else {}
+        async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+            response = await client.post(
+                f"{endpoint.api_origin.rstrip('/')}/api/sessions/owner-backfill",
+                json=payload,
+                headers={"X-Hermes-Gateway-Ticket": ticket},
+            )
+    except (GatewayClientError, DiscoveryError, OSError, TimeoutError, httpx.RequestError) as exc:
+        _log.warning("owner-backfill forward to live Gateway failed for %s (%s)", stamp, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="owner_unreachable") from exc
+
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="invalid_owner_response") from exc
+    if response.status_code >= 400:
+        detail = result.get("detail", "owner_backfill_failed") if isinstance(result, dict) else "owner_backfill_failed"
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    if (not isinstance(result, dict) or result.get("ok") is not True
+            or result.get("profile") != stamp or type(result.get("stamped")) is not int):
+        raise HTTPException(status_code=502, detail="invalid_owner_response")
+    return result
+
+
 def _with_session_maintenance(profile, operation, *args):
     """Offline bulk actions reserve the exact owner lock through final DB close."""
     from fastapi import HTTPException
