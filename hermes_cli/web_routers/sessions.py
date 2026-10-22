@@ -39,6 +39,7 @@ _cron_default_profile = late("_cron_default_profile", "hermes_cli.web_server_cro
 _cron_profile_home = late("_cron_profile_home", "hermes_cli.web_server_cron")
 _open_session_db_for_profile = late("_open_session_db_for_profile", "hermes_cli.web_server_sessions")
 _session_db_path_for_profile = late("_session_db_path_for_profile", "hermes_cli.web_server_sessions")
+_backfill_via_gateway_owner = late("_backfill_via_gateway_owner", "hermes_cli.web_server_sessions")
 
 _NOT_FOUND = "Session not found"
 
@@ -904,17 +905,35 @@ async def backfill_session_owner_profiles(body: SessionOwnerBackfill, request: R
     """
     stamp = _serving_profile(body.profile)
 
+    owner_db = _owner_db_for(request, body.profile)
+    if owner_db is None:
+        forwarded = await _backfill_via_gateway_owner(body.profile, stamp)
+        if forwarded is not None:
+            return forwarded
+
     with http_failure(
         "POST /api/sessions/owner-backfill failed", 500, detail="Internal server error"):
-        owner_db = _owner_db_for(request, body.profile)
         if owner_db is not None:
             # A live gateway owns this store: it is the only writer (the offline maintenance lock
             # would 409 every Desktop boot), so the idempotent stamp runs on its own connection.
             stamped = await asyncio.to_thread(owner_db.backfill_null_session_profiles, stamp)
         else:
-            stamped = await asyncio.to_thread(
-                _with_db, body.profile, lambda db: db.backfill_null_session_profiles(stamp),
-                read_only=False)
+            try:
+                stamped = await asyncio.to_thread(
+                    _with_db, body.profile, lambda db: db.backfill_null_session_profiles(stamp),
+                    read_only=False)
+            except HTTPException as exc:
+                detail = exc.detail
+                if (exc.status_code != 409 or not isinstance(detail, str)
+                        or not detail.startswith(
+                            "Exclusive maintenance refused: Gateway runtime already owns profile ")):
+                    raise
+                # The owner may have started after discovery but before the offline lock.
+                # Retry only this precise lock refusal; preserve every other 409 verbatim.
+                forwarded = await _backfill_via_gateway_owner(body.profile, stamp)
+                if forwarded is None:
+                    raise
+                return forwarded
 
     if stamped:
         _log.info(
